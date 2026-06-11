@@ -17,7 +17,7 @@ spec:
 
         - alert: ApiHighErrorRate
           expr: api:request_error_ratio:rate1m > 0.10
-          for: 1m
+          for: 0m
           labels:
             severity: critical
             service: api
