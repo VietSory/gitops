@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-html
+  namespace: demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+data:
+  index.html: |
+    <!doctype html>
+    <html>
+      <head>
+        <title>GitOps Frontend + Backend</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 720px;
+            margin: 60px auto;
+            background: #f6f8fa;
+          }
+          .card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          }
+          button {
+            padding: 10px 16px;
+            border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+          }
+          pre {
+            background: #111827;
+            color: #e5e7eb;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Frontend is running</h1>
+          <p>App này được sync bởi Argo CD từ GitHub.</p>
+
+          <button onclick="callBackend()">Call Backend API</button>
+
+          <h3>Backend response:</h3>
+          <pre id="result">Click button to call backend...</pre>
+        </div>
+
+        <script>
+          async function callBackend() {
+            const res = await fetch('/api/quote');
+            const data = await res.json();
+            document.getElementById('result').innerText =
+              JSON.stringify(data, null, 2);
+          }
+        </script>
+      </body>
+    </html>
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-config
+  namespace: demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+data:
+  default.conf: |
+    server {
+      listen 80;
+
+      location / {
+        root /usr/share/nginx/html;
+        index index.html;
+      }
+
+      location /api/ {
+        proxy_pass http://backend:8000/api/;
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: frontend-html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+            - name: frontend-nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: frontend-html
+          configMap:
+            name: frontend-html
+        - name: frontend-nginx-config
+          configMap:
+            name: frontend-nginx-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
