@@ -26,7 +26,7 @@ spec:
             - name: ERROR_RATE
               value: "1"
             - name: VERSION
-              value: "v-bad-email-test"
+              value: "v-bad-emails-test"
           readinessProbe:
             httpGet:
               path: /healthz
