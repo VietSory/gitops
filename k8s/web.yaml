@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web, namespace: demo }
+spec:
+  replicas: 2
+  selector: { matchLables: { app: web } }
+  template:
+    metadata: { labels: { app: web }}
+    spec:
+      containers:
+      - { name: web , image: nginx:1.27 }
+
