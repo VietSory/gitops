@@ -45,6 +45,7 @@ spec:
         prometheus:
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
         grafana:
           adminPassword: admin123
   destination:

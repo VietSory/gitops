@@ -5,6 +5,7 @@ metadata:
   namespace: monitoring
   labels:
     app: api
+    release: kube-prometheus-stack
 spec:
   groups:
     - name: api-slo.rules
