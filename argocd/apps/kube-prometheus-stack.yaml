@@ -20,19 +20,21 @@ spec:
               smtp_auth_username: vietpno3@gmail.com
               smtp_auth_password: /etc/alertmanager/secrets/alertmanager-gmail-secret/smtp-auth-password
               smtp_require_tls: true
-            route:
-              group_by: ["alertname", "service"]
-              group_wait: 10s
-              group_interval: 30s
-              repeat_interval: 5m
-              receiver: email-personal
-              routes:
-                - receiver: email-personal
-                  matchers:
-                    - alertname="ApiHighErrorRate"
-            receivers:
-              - name: email-personal
-                email_configs:
+              route:
+                receiver: "null"
+                group_by: ["alertname", "service"]
+                group_wait: 10s
+                group_interval: 30s
+                repeat_interval: 5m
+                routes:
+                  - receiver: email-personal
+                    matchers:
+                      - alertname="ApiHighErrorRate"
+
+              receivers:
+                - name: "null"
+                - name: email-personal
+                  email_configs:
                   - to: nampno3@gmail.com
                     send_resolved: true
         prometheus:
