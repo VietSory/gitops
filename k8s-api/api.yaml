@@ -24,9 +24,9 @@ spec:
               containerPort: 8080
           env:
             - name: ERROR_RATE
-              value: "1"
+              value: "0"
             - name: VERSION
-              value: "v2-good"
+              value: "v2-goods"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -34,15 +34,15 @@ spec:
   strategy:
     canary:
       steps:
-      - setWeight: 25
-      - analysis:
-          templates:
-            - templateName: api-error-rate
-      - setWeight: 50
-      - analysis:
-          templates:
-            - templateName: api-error-rate
-      - setWeight: 100
+        - setWeight: 25
+        - analysis:
+            templates:
+              - templateName: api-error-rate
+        - setWeight: 50
+        - analysis:
+            templates:
+              - templateName: api-error-rate
+        - setWeight: 100
 ---
 apiVersion: v1
 kind: Service
