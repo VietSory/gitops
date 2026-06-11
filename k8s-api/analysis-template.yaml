@@ -15,6 +15,15 @@ spec:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
           query: |
-            sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
+            (
+              sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
+              or vector(0)
+            )
             /
-            clamp_min(sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m])), 0.001)
+            clamp_min(
+              (
+                sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m]))
+                or vector(0)
+              ),
+              0.001
+            )
