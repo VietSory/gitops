@@ -42,7 +42,7 @@ data:
       <body>
         <div class="card">
           <h1>Frontend is running</h1>
-          <p>App này được sync bởi Argo CD từ GitHub.</p>
+          <p>App này duoc sync tu git by argocd.</p>
 
           <button onclick="callBackend()">Call Backend API</button>
 
