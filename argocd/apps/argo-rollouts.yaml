@@ -12,8 +12,8 @@ spec:
     targetRevision: 2.37.7
     helm:
       values: |
-        crds:
-          install: false
+        installCRDs: true
+        keepCRDs: true
 
   destination:
     server: https://kubernetes.default.svc
