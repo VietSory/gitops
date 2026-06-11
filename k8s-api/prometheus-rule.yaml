@@ -1,0 +1,27 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api-slo-alerts
+  namespace: monitoring
+  labels:
+    app: api
+spec:
+  groups:
+    - name: api-slo.rules
+      rules:
+        - record: api:request_error_ratio:rate1m
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
+            /
+            clamp_min(sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m])), 0.001)
+
+        - alert: ApiHighErrorRate
+          expr: api:request_error_ratio:rate1m > 0.10
+          for: 1m
+          labels:
+            severity: critical
+            service: api
+            slo: availability
+          annotations:
+            summary: "API error rate is too high"
+            description: "API error rate is above 10% for more than 1 minute. This violates the 99% availability SLO."

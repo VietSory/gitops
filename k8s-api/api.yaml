@@ -34,13 +34,15 @@ spec:
   strategy:
     canary:
       steps:
-        - setWeight: 25
-        - pause: {}
-        - setWeight: 50
-        - pause:
-            duration: 30s
-        - setWeight: 100
-
+      - setWeight: 25
+      - analysis:
+          templates:
+            - templateName: api-error-rate
+      - setWeight: 50
+      - analysis:
+          templates:
+            - templateName: api-error-rate
+      - setWeight: 100
 ---
 apiVersion: v1
 kind: Service

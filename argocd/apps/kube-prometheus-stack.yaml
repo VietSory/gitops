@@ -11,6 +11,30 @@ spec:
     targetRevision: 65.1.1
     helm:
       values: |
+        alertmanager:
+          config:
+            global:
+              resolve_timeout: 1m
+              smtp_smarthost: smtp.gmail.com:587
+              smtp_from: vietpno3@gmail.com
+              smtp_auth_username: vietpno3@gmail.com
+              smtp_auth_password: /etc/alertmanager/secrets/alertmanager-gmail-secret/smtp-auth-password
+              smtp_require_tls: true
+            route:
+              group_by: ["alertname", "service"]
+              group_wait: 10s
+              group_interval: 30s
+              repeat_interval: 5m
+              receiver: email-personal
+              routes:
+                - receiver: email-personal
+                  matchers:
+                    - alertname="ApiHighErrorRate"
+            receivers:
+              - name: email-personal
+                email_configs:
+                  - to: nampno3@gmail.com
+                    send_resolved: true
         prometheus:
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
