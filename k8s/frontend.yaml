@@ -10,6 +10,7 @@ data:
     <!doctype html>
     <html>
       <head>
+        <meta charset="UTF-8">
         <title>GitOps Frontend + Backend</title>
         <style>
           body {
