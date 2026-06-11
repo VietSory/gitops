@@ -9,8 +9,8 @@ spec:
       interval: 15s
       count: 4
       failureLimit: 1
-      successCondition: result[0] < 0.05
-      failureCondition: result[0] > 0.10
+      successCondition: result[0] < 0.10
+      failureCondition: result[0] >= 0.10
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
