@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argo-rollouts
+  name: argo-rollouts-crds
   namespace: argocd
 spec:
   project: default
@@ -12,8 +12,12 @@ spec:
     targetRevision: 2.37.7
     helm:
       values: |
+        controller:
+          enabled: false
+        dashboard:
+          enabled: false
         crds:
-          install: false
+          install: true
 
   destination:
     server: https://kubernetes.default.svc
