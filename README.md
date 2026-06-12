@@ -554,63 +554,7 @@ This confirms that the repository and cluster returned to a clean state after ro
 
 ---
 
-## 16. Commands Used During Verification
-
-Start traffic generator:
-
-```bash
-kubectl -n demo delete pod load --ignore-not-found
-
-kubectl -n demo run load --image=busybox --restart=Never -- \
-  sh -c "while true; do wget -qO- http://api:8080/; sleep 0.2; done"
-```
-
-Watch rollout:
-
-```bash
-kubectl argo rollouts get rollout api -n demo --watch
-```
-
-List AnalysisRuns:
-
-```bash
-kubectl -n demo get analysisrun --sort-by=.metadata.creationTimestamp
-```
-
-Describe failed AnalysisRun:
-
-```bash
-kubectl -n demo describe analysisrun api-6fcbd688d4-11-1
-```
-
-Check ReplicaSets:
-
-```bash
-kubectl -n demo get rs -l app=api
-```
-
-Check PrometheusRule:
-
-```bash
-kubectl -n monitoring get prometheusrule api-slo-alerts --show-labels
-```
-
-Check Argo CD:
-
-```bash
-kubectl -n argocd get app
-```
-
-Check Git:
-
-```bash
-git log --oneline --max-count=8
-git status
-```
-
----
-
-## 17. Result Summary
+## 16. Result Summary
 
 | Requirement             | Result                                                                 |
 | ----------------------- | ---------------------------------------------------------------------- |
