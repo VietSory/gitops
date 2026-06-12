@@ -1,18 +1,18 @@
 # Ship Smartly — GitOps, Observability, and Automated Canary Rollout
 
-## 1. Goal
+## 1. Overview
 
-This challenge demonstrates a safe delivery pipeline for an API service.
+This project implements a safe delivery pipeline for an API service on Kubernetes.
 
-The system releases a new API version through Git, lets Argo CD sync the desired state, uses Argo Rollouts to run a canary deployment, evaluates the canary with Prometheus metrics, and automatically aborts the rollout when the new version is unhealthy.
+The API is released through Git. Argo CD syncs the desired state from Git into the cluster. Argo Rollouts performs canary deployment. Prometheus measures API quality through application metrics. If the canary is healthy, it continues to 100%. If the canary is unhealthy, the rollout is automatically aborted and the previous stable version continues serving traffic.
 
-The final pipeline covers three areas:
+The challenge combines three main areas:
 
-| Area                 | Implementation                                                                                                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| GitOps               | All changes are committed and pushed to Git. Argo CD syncs the Kubernetes state from the repository.                  |
-| Observability        | Prometheus scrapes API metrics, evaluates an SLO alert, and sends notification through Alertmanager email receiver.   |
-| Progressive Delivery | Argo Rollouts releases the new version gradually and uses an AnalysisTemplate to decide whether to continue or abort. |
+| Area                 | Implementation                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| GitOps               | All changes are committed and pushed to Git. Argo CD syncs Kubernetes resources from the repository. |
+| Observability        | Prometheus scrapes API metrics, evaluates an SLO alert, and Alertmanager sends email notification.   |
+| Progressive Delivery | Argo Rollouts uses Prometheus analysis to automatically promote or abort canary releases.            |
 
 ---
 
@@ -21,45 +21,43 @@ The final pipeline covers three areas:
 ```mermaid
 flowchart TD
     Dev[Developer] -->|git commit + git push| GitHub[GitHub Repository]
+    GitHub -->|desired state| ArgoCD[Argo CD]
 
-    GitHub -->|sync desired state| ArgoCD[Argo CD]
+    ArgoCD --> Root[Root Application]
+    Root --> ApiApp[api Application]
+    Root --> PromApp[kube-prometheus-stack]
+    Root --> RolloutsApp[argo-rollouts]
 
-    ArgoCD --> RootApp[Root Application]
-    RootApp --> ApiApp[api Application]
-    RootApp --> PromStack[kube-prometheus-stack]
-    RootApp --> RolloutsApp[argo-rollouts]
-
-    ApiApp --> Rollout[Argo Rollouts: api Rollout]
+    ApiApp --> Rollout[api Rollout]
     Rollout --> StableRS[Stable ReplicaSet]
     Rollout --> CanaryRS[Canary ReplicaSet]
 
-    Service[api Service] --> StableRS
-    Service --> CanaryRS
-
-    LoadPod[load pod] -->|HTTP requests| Service
+    LoadPod[load pod] --> ApiSvc[api Service]
+    ApiSvc --> StableRS
+    ApiSvc --> CanaryRS
 
     ServiceMonitor[ServiceMonitor api] --> Prometheus[Prometheus]
-    Prometheus -->|scrape /metrics| Service
+    Prometheus -->|scrape /metrics| ApiSvc
 
     AnalysisTemplate[AnalysisTemplate api-error-rate] -->|PromQL query| Prometheus
     Rollout -->|run analysis during canary| AnalysisTemplate
 
     PrometheusRule[PrometheusRule api-slo-alerts] --> Prometheus
     Prometheus --> Alertmanager[Alertmanager]
-    Alertmanager -->|ApiHighErrorRate only| Email[Personal Email]
+    Alertmanager -->|ApiHighErrorRate| Email[Personal Email]
 ```
 
-### Request flow
+Pipeline flow:
 
 ```text
-load pod
-  -> api Service
-  -> stable pods + canary pod
-  -> Flask API
-  -> /metrics exposed by prometheus-flask-exporter
-  -> Prometheus scrape
-  -> AnalysisTemplate checks error ratio
-  -> Rollout continues or aborts
+Developer changes api.yaml
+  -> git commit + git push
+  -> Argo CD syncs api Application
+  -> Argo Rollouts creates a canary ReplicaSet
+  -> Prometheus checks API error ratio
+  -> AnalysisTemplate decides pass or fail
+  -> good canary reaches 100%
+  -> bad canary is aborted
 ```
 
 ---
@@ -85,50 +83,67 @@ gitops/
 │   └── servicemonitor.yaml
 └── docs/
     └── images/
+        ├── 01-argocd-apps.png
+        ├── 02-prometheus-target-api-up.png
+        ├── 03-prometheus-rule-loaded.png
+        ├── 04-rollback-abord.png
+        ├── 05-workload-stable.png
+        ├── 06-email-received.png
+        ├── 07-rollout-auto-abort.png
+        ├── 08-analysisrun-failed.png
+        ├── 09-table-vs-bad-env.png
+        └── 10-final-healthy.png
 ```
 
 ---
 
-## 4. Main Components
+## 4. GitOps Implementation
 
-### 4.1 Argo CD
+All changes were made through Git.
 
-Argo CD watches the Git repository and syncs Kubernetes resources from Git into the cluster.
+The API application is managed by Argo CD. The `api` Argo CD Application points to the `k8s-api/` directory, where the Rollout, Service, ServiceMonitor, PrometheusRule, and AnalysisTemplate are stored.
 
-The root application follows the app-of-apps pattern. It reads child applications from:
+Command used to verify Argo CD applications:
 
-```text
-argocd/apps/
+```bash
+kubectl -n argocd get app
 ```
 
-The API application points to:
+Evidence:
 
-```text
-k8s-api/
-```
+![Argo CD applications](docs/images/01-argocd-apps.png)
 
-This means the API Rollout, Service, ServiceMonitor, PrometheusRule, and AnalysisTemplate are all managed from Git.
+The screenshot shows that Argo CD manages the applications used in this challenge, including:
+
+| Application             | Purpose                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| `root`                  | App-of-apps parent application                                                     |
+| `api`                   | Deploys API Rollout, Service, AnalysisTemplate, ServiceMonitor, and PrometheusRule |
+| `kube-prometheus-stack` | Installs Prometheus, Grafana, Alertmanager, Prometheus Operator                    |
+| `argo-rollouts`         | Installs Argo Rollouts controller                                                  |
 
 ---
 
-### 4.2 Flask API
+## 5. API Application
 
-The API is a simple Flask service with three important endpoints:
+The API is a Flask application packaged as a Docker image.
 
-| Endpoint   | Purpose                                 |
-| ---------- | --------------------------------------- |
-| `/`        | Returns JSON response with app version. |
-| `/healthz` | Readiness check endpoint.               |
-| `/metrics` | Prometheus metrics endpoint.            |
+Important endpoints:
 
-The API uses environment variables:
+| Endpoint   | Purpose                          |
+| ---------- | -------------------------------- |
+| `/`        | Returns API response and version |
+| `/healthz` | Readiness probe endpoint         |
+| `/metrics` | Prometheus metrics endpoint      |
 
-| Variable     | Meaning                                                                            |
-| ------------ | ---------------------------------------------------------------------------------- |
-| `VERSION`    | Identifies the deployed version, for example `v-good-final` or `v-bad-auto-abort`. |
-| `ERROR_RATE` | Controls injected failure rate. `0` means healthy, `1` means 100% error injection. |
+The API supports two environment variables:
 
-Example healthy version:
+| Variable     | Purpose                         |
+| ------------ | ------------------------------- |
+| `VERSION`    | Identifies the deployed version |
+| `ERROR_RATE` | Injects failures for testing    |
+
+Healthy version example:
 
 ```yaml
 - name: ERROR_RATE
@@ -137,7 +152,7 @@ Example healthy version:
   value: "v-good-final"
 ```
 
-Example bad version:
+Bad version example:
 
 ```yaml
 - name: ERROR_RATE
@@ -146,93 +161,74 @@ Example bad version:
   value: "v-bad-auto-abort"
 ```
 
----
-
-## 5. Canary Strategy
-
-The API is deployed as an Argo Rollouts `Rollout`, not a standard Kubernetes `Deployment`.
-
-The Rollout strategy is canary-based:
-
-```yaml
-strategy:
-  canary:
-    steps:
-      - setWeight: 25
-      - analysis:
-          templates:
-            - templateName: api-error-rate
-      - setWeight: 50
-      - analysis:
-          templates:
-            - templateName: api-error-rate
-      - setWeight: 100
-```
-
-### Canary behavior
-
-| Step             | Meaning                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `setWeight: 25`  | Start the new version with approximately 25% canary weight. With 4 replicas, this usually means 1 canary pod and 3 stable pods. |
-| `analysis`       | Query Prometheus to check API error rate.                                                                                       |
-| `setWeight: 50`  | Continue only if analysis succeeds.                                                                                             |
-| `setWeight: 100` | Promote the new version fully if all checks pass.                                                                               |
-
-This challenge does not use manual `promote` or `abort`. The rollout decision is made by Prometheus metrics through the AnalysisTemplate.
+`ERROR_RATE=1` means the new version intentionally returns errors. This was used to prove that the canary can be automatically aborted.
 
 ---
 
-## 6. AnalysisTemplate
+## 6. Prometheus Metrics Scraping
 
-File:
+The API exposes metrics at:
 
 ```text
-k8s-api/analysis-template.yaml
+/metrics
 ```
 
-The AnalysisTemplate queries Prometheus during the canary rollout.
+Prometheus discovers the API through `ServiceMonitor`.
+
+ServiceMonitor configuration:
 
 ```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: AnalysisTemplate
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
 metadata:
-  name: api-error-rate
-  namespace: demo
+  name: api
+  namespace: monitoring
 spec:
-  metrics:
-    - name: api-error-rate
+  namespaceSelector:
+    matchNames:
+      - demo
+  selector:
+    matchLabels:
+      app: api
+  endpoints:
+    - port: http
+      path: /metrics
       interval: 15s
-      count: 4
-      failureLimit: 1
-      successCondition: result[0] < 0.10
-      failureCondition: result[0] >= 0.10
-      provider:
-        prometheus:
-          address: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
-          query: |
-            (
-              sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
-              or vector(0)
-            )
-            /
-            clamp_min(
-              (
-                sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m]))
-                or vector(0)
-              ),
-              0.001
-            )
 ```
 
-### Formula
+Command used to open Prometheus:
 
-The analysis calculates API error ratio:
+```bash
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+```
+
+Prometheus target page:
 
 ```text
-error_ratio = 5xx_requests_per_second / total_requests_per_second
+http://localhost:9090/targets
 ```
 
-PromQL:
+Evidence:
+
+![Prometheus API target UP](docs/images/02-prometheus-target-api-up.png)
+
+The API target is UP, which means Prometheus successfully scrapes `/metrics` from the API pods.
+
+---
+
+## 7. SLO and Alert Rule
+
+The selected SLO is based on API availability.
+
+In this lab, availability is measured through HTTP 5xx error ratio.
+
+Formula:
+
+```text
+error_ratio = 5xx_request_rate / total_request_rate
+```
+
+PromQL recording rule:
 
 ```promql
 (
@@ -249,83 +245,17 @@ clamp_min(
 )
 ```
 
-### Why `or vector(0)` is used
+Explanation:
 
-When Prometheus has no matching time series yet, a query may return an empty result. Argo Rollouts expects `result[0]`. If the query returns nothing, the analysis can fail with an index error.
+| Part                    | Meaning                                            |
+| ----------------------- | -------------------------------------------------- |
+| `rate(...[1m])`         | Calculates request rate over the last 1 minute     |
+| `status=~"5.."`         | Selects HTTP 5xx responses                         |
+| `sum(...)`              | Aggregates across all API pods                     |
+| `or vector(0)`          | Returns 0 if Prometheus has no matching series yet |
+| `clamp_min(..., 0.001)` | Prevents division by zero                          |
 
-`or vector(0)` makes the query return `0` instead of an empty result.
-
-### Why `clamp_min(..., 0.001)` is used
-
-The denominator is the total request rate. If there are no requests, the denominator can be `0`.
-
-`clamp_min(..., 0.001)` prevents division by zero.
-
-### Success and failure thresholds
-
-| Condition             | Result                                   |
-| --------------------- | ---------------------------------------- |
-| `error_ratio < 0.10`  | Analysis succeeds. Rollout can continue. |
-| `error_ratio >= 0.10` | Analysis fails. Rollout aborts.          |
-
-The threshold is set to `10%` for lab demonstration. With 4 replicas and 25% canary, a fully broken canary usually creates an error ratio around 25%, which is above the 10% threshold.
-
-### Analysis timing
-
-| Field             | Meaning                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `interval: 15s`   | Run one Prometheus measurement every 15 seconds.                                      |
-| `count: 4`        | Run up to 4 measurements.                                                             |
-| `failureLimit: 1` | Allow only 1 failed measurement. The second failed measurement fails the AnalysisRun. |
-
-Therefore, the rollout aborts when the canary causes the error ratio to be greater than or equal to 10% in more than one measurement.
-
----
-
-## 7. SLO and Alert
-
-File:
-
-```text
-k8s-api/prometheus-rule.yaml
-```
-
-The challenge requires one SLO and one alert.
-
-### SLO
-
-```text
-API Availability SLO: the API should keep a low 5xx error ratio.
-```
-
-The practical lab indicator is:
-
-```text
-error_ratio_1m <= 10%
-```
-
-This lab uses a relaxed threshold to make the alert and auto-abort easy to demonstrate. In a production system, this threshold should be replaced by a stricter SLO or a burn-rate alert.
-
-### Prometheus recording rule
-
-```yaml
-- record: api:request_error_ratio:rate1m
-  expr: |
-    (
-      sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
-      or vector(0)
-    )
-    /
-    clamp_min(
-      (
-        sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m]))
-        or vector(0)
-      ),
-      0.001
-    )
-```
-
-### Alert rule
+The alert rule:
 
 ```yaml
 - alert: ApiHighErrorRate
@@ -340,17 +270,29 @@ This lab uses a relaxed threshold to make the alert and auto-abort easy to demon
     description: "API error rate is above 10%. This violates the API availability SLO."
 ```
 
-The alert fires immediately when the API error ratio is greater than 10%.
+Threshold:
 
-`for: 0m` is used for lab verification because the canary can be aborted quickly. Waiting for one minute may cause the canary to disappear before the alert reaches `FIRING`.
+| Error ratio | Result                                   |
+| ----------- | ---------------------------------------- |
+| `<= 10%`    | Acceptable for this lab                  |
+| `> 10%`     | SLO alert fires                          |
+| `>= 10%`    | Canary analysis fails and Rollout aborts |
+
+`for: 0m` was used because canary rollback can happen quickly. If the alert waited for 1 minute, the bad canary might already be aborted before the alert became `FIRING`.
+
+Prometheus loaded the rule:
+
+![Prometheus rule loaded](docs/images/03-prometheus-rule-loaded.png)
 
 ---
 
-## 8. Alertmanager Email Routing
+## 8. Alertmanager Email Notification
 
-Alertmanager is configured to send only the API SLO alert to email.
+Alertmanager was configured to send only the custom API alert to email.
 
-System alerts are routed to a null receiver to avoid email spam from minikube control-plane alerts.
+System alerts were routed to `null` to avoid email spam from minikube-related alerts.
+
+Alertmanager route:
 
 ```yaml
 route:
@@ -372,220 +314,203 @@ receivers:
         send_resolved: true
 ```
 
-The Gmail App Password is stored in a Kubernetes Secret and mounted into Alertmanager.
+The Gmail App Password was stored in a Kubernetes Secret and mounted into Alertmanager.
 
 ```yaml
 smtp_auth_password_file: /etc/alertmanager/secrets/alertmanager-gmail-secret/smtp-auth-password
 ```
 
-The secret value is not committed to Git.
+The secret value was not committed to Git.
+
+Email evidence:
+
+![Email received](docs/images/06-email-received.png)
+
+This proves that the SLO alert was successfully delivered to the personal email receiver.
 
 ---
 
-## 9. Verification Evidence
+## 9. Canary Strategy
 
-### 9.1 Argo CD Applications
+The API is deployed as an Argo Rollouts `Rollout`.
+
+The canary strategy:
+
+```yaml
+strategy:
+  canary:
+    steps:
+      - setWeight: 25
+      - analysis:
+          templates:
+            - templateName: api-error-rate
+      - setWeight: 50
+      - analysis:
+          templates:
+            - templateName: api-error-rate
+      - setWeight: 100
+```
+
+With 4 replicas:
+
+```text
+25% canary = 1 canary pod + 3 stable pods
+```
+
+No manual `promote` or `abort` is required. The rollout decision is made by the AnalysisTemplate.
+
+---
+
+## 10. AnalysisTemplate
+
+The AnalysisTemplate queries Prometheus during the canary rollout.
+
+File:
+
+```text
+k8s-api/analysis-template.yaml
+```
+
+Important configuration:
+
+```yaml
+successCondition: result[0] < 0.10
+failureCondition: result[0] >= 0.10
+interval: 15s
+count: 4
+failureLimit: 1
+```
+
+Decision logic:
+
+| Condition                      | Rollout decision                            |
+| ------------------------------ | ------------------------------------------- |
+| `result[0] < 0.10`             | Analysis succeeds and rollout continues     |
+| `result[0] >= 0.10`            | Analysis fails                              |
+| More than 1 failed measurement | AnalysisRun fails because `failureLimit: 1` |
+| AnalysisRun fails              | Rollout automatically aborts the canary     |
+
+This removes the previous inconclusive gap between 5% and 10%. The rollout now has a clear result: pass or fail.
+
+---
+
+## 11. Automated Canary Abort Test
+
+A bad version was released through Git:
+
+```yaml
+- name: ERROR_RATE
+  value: "1"
+- name: VERSION
+  value: "v-bad-auto-abort"
+```
+
+Git commands used:
+
+```bash
+git add k8s-api/api.yaml
+git commit -m "release bad api for auto abort test"
+git push
+```
+
+Argo CD synced the change. Argo Rollouts started the canary and ran the Prometheus analysis.
 
 Evidence:
 
-```bash
-kubectl -n argocd get app
-```
+![Rollout auto abort](docs/images/07-rollout-auto-abort.png)
 
-Expected result:
+Important output:
 
 ```text
-root                    Synced   Healthy
-kube-prometheus-stack   Synced   Healthy
-argo-rollouts           Healthy
-api                     Synced   Healthy
+RolloutAborted: Rollout aborted update to revision 11
 ```
 
-Screenshot:
+The failed canary revision:
 
 ```text
-docs/images/01-argocd-apps.png
+revision 11
+api-6fcbd688d4        ReplicaSet   ScaledDown   canary
+api-6fcbd688d4-11-1   AnalysisRun  Failed
 ```
 
----
-
-### 9.2 Good Canary Release
-
-A healthy release uses:
-
-```yaml
-ERROR_RATE: "0"
-VERSION: "v-good-final"
-```
-
-Evidence:
-
-```bash
-kubectl argo rollouts get rollout api -n demo
-```
-
-Expected result:
+The previous stable revision:
 
 ```text
-AnalysisRun Successful
-Rollout Healthy
-Stable ReplicaSet has 4 Running pods
-```
-
-Screenshot:
-
-```text
-docs/images/02-rollout-good-success.png
-```
-
----
-
-### 9.3 Bad Canary Auto-Abort
-
-A bad release uses:
-
-```yaml
-ERROR_RATE: "1"
-VERSION: "v-bad-auto-abort"
-```
-
-Evidence from the rollout:
-
-```text
-Status:  Degraded
-Message: RolloutAborted: Rollout aborted update to revision 11
-```
-
-The failed revision:
-
-```text
-revision:11
-api-6fcbd688d4      ReplicaSet    ScaledDown    canary
-api-6fcbd688d4-11-1 AnalysisRun   Failed
-```
-
-The old stable revision:
-
-```text
-revision:5
-api-5bb676778f      ReplicaSet    Healthy       stable
+revision 5
+api-5bb676778f        ReplicaSet   Healthy      stable
 4 pods Running
 ```
 
-This proves that the bad canary was stopped and the old stable version kept serving traffic.
-
-Screenshot:
-
-```text
-docs/images/03-rollout-auto-abort.png
-```
+This proves that the new bad version did not become stable.
 
 ---
 
-### 9.4 AnalysisRun Failure
+## 12. AnalysisRun Failure Evidence
 
-Evidence:
+Command used:
 
 ```bash
 kubectl -n demo describe analysisrun api-6fcbd688d4-11-1
 ```
 
-Expected content:
+Evidence:
+
+![AnalysisRun failed](docs/images/08-analysisrun-failed.png)
+
+The AnalysisRun failed because the Prometheus value crossed the configured threshold.
+
+The expected reason is:
 
 ```text
-Metric: api-error-rate
-Phase: Failed
-Value: greater than or equal to 0.10
+api-error-rate >= 0.10
 ```
 
-Screenshot:
-
-```text
-docs/images/04-analysisrun-failed.png
-```
+Since `failureLimit` is set to `1`, the second failed measurement causes the whole AnalysisRun to fail. Argo Rollouts then aborts the canary update.
 
 ---
 
-### 9.5 Stable vs Canary ReplicaSets
+## 13. How Abort Returned to the Old Version
+
+Argo Rollouts does not display a sentence like “rolled back to the old version”. Instead, it shows this through ReplicaSet state.
+
+Bad canary revision:
+
+```text
+revision 11
+ReplicaSet: api-6fcbd688d4
+Status: ScaledDown
+Role: canary
+```
+
+Previous stable revision:
+
+```text
+revision 5
+ReplicaSet: api-5bb676778f
+Status: Healthy
+Role: stable
+Pods: 4 Running
+```
 
 Evidence:
 
-```bash
-kubectl -n demo get rs -l app=api
-```
+![Workload stable](docs/images/05-workload-stable.png)
 
-Expected interpretation:
+This is the practical rollback behavior: the bad canary is scaled down, while the previous stable ReplicaSet remains active and continues serving traffic.
 
-```text
-Bad canary ReplicaSet: 0 pods
-Stable ReplicaSet: 4 pods
-```
+Environment comparison:
 
-Screenshot:
+![Stable vs bad env](docs/images/09-table-vs-bad-env.png)
 
-```text
-docs/images/05-replicaset-stable-vs-canary.png
-```
+This shows the difference between the stable version and the bad canary version.
 
 ---
 
-### 9.6 Prometheus Alert
+## 14. Rollback Through Git Revert
 
-Evidence:
+The challenge requires rollback through Git in less than 5 minutes.
 
-```text
-Prometheus -> Alerts -> ApiHighErrorRate -> FIRING
-```
-
-Screenshot:
-
-```text
-docs/images/07-prometheus-alert-firing.png
-```
-
-Useful PromQL:
-
-```promql
-api:request_error_ratio:rate1m
-```
-
----
-
-### 9.7 Alertmanager Email Route
-
-Evidence:
-
-```text
-Alertmanager -> ApiHighErrorRate -> receiver email-personal
-```
-
-Screenshot:
-
-```text
-docs/images/08-alertmanager-email-route.png
-```
-
----
-
-### 9.8 Email Received
-
-Evidence:
-
-```text
-Inbox contains alert email for ApiHighErrorRate
-```
-
-Screenshot:
-
-```text
-docs/images/09-email-received.png
-```
-
----
-
-### 9.9 Git Revert Rollback
-
-Rollback command:
+Rollback was performed with:
 
 ```bash
 git revert HEAD --no-edit
@@ -595,33 +520,43 @@ kubectl -n argocd annotate app api argocd.argoproj.io/refresh=hard --overwrite
 
 Evidence:
 
-```bash
-git log --oneline --max-count=8
-kubectl -n argocd get app api
-kubectl argo rollouts get rollout api -n demo
-```
+![Rollback abort](docs/images/04-rollback-abord.png)
 
-Expected result:
-
-```text
-A revert commit exists.
-Argo CD syncs the reverted desired state.
-Rollout returns to a healthy stable version.
-Rollback is completed in less than 5 minutes.
-```
-
-Screenshot:
-
-```text
-docs/images/10-git-revert-rollback.png
-docs/images/11-final-healthy.png
-```
+This proves the rollback path is Git-based, not a manual `kubectl edit` or direct manifest apply.
 
 ---
 
-## 10. Test Commands
+## 15. Final Healthy State
 
-### Start load generator
+After rollback, the final state was checked.
+
+Commands:
+
+```bash
+kubectl -n argocd get app api
+kubectl argo rollouts get rollout api -n demo
+git status
+```
+
+Expected final state:
+
+```text
+api Synced Healthy
+Rollout Healthy
+working tree clean
+```
+
+Evidence:
+
+![Final healthy](docs/images/10-final-healthy.png)
+
+This confirms that the repository and cluster returned to a clean state after rollback.
+
+---
+
+## 16. Commands Used During Verification
+
+Start traffic generator:
 
 ```bash
 kubectl -n demo delete pod load --ignore-not-found
@@ -630,61 +565,72 @@ kubectl -n demo run load --image=busybox --restart=Never -- \
   sh -c "while true; do wget -qO- http://api:8080/; sleep 0.2; done"
 ```
 
-### Watch rollout
+Watch rollout:
 
 ```bash
 kubectl argo rollouts get rollout api -n demo --watch
 ```
 
-### List AnalysisRuns
+List AnalysisRuns:
 
 ```bash
 kubectl -n demo get analysisrun --sort-by=.metadata.creationTimestamp
 ```
 
-### Describe failed AnalysisRun
+Describe failed AnalysisRun:
 
 ```bash
 kubectl -n demo describe analysisrun api-6fcbd688d4-11-1
 ```
 
-### Check API ReplicaSets
+Check ReplicaSets:
 
 ```bash
 kubectl -n demo get rs -l app=api
 ```
 
-### Check Argo CD status
-
-```bash
-kubectl -n argocd get app
-```
-
-### Check PrometheusRule
+Check PrometheusRule:
 
 ```bash
 kubectl -n monitoring get prometheusrule api-slo-alerts --show-labels
 ```
 
----
+Check Argo CD:
 
-## 11. Result Summary
-
-The challenge was completed successfully.
-
-| Requirement                  | Result                                                                                               |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Change through Git           | API changes were committed and pushed to Git. Argo CD synced the Kubernetes state.                   |
-| Git rollback under 5 minutes | `git revert` was used to rollback the bad release.                                                   |
-| SLO and alert                | `ApiHighErrorRate` fired when the API error ratio exceeded 10%.                                      |
-| Email notification           | Alertmanager routed `ApiHighErrorRate` to the personal email receiver.                               |
-| Automated canary abort       | The bad canary revision was aborted automatically by Argo Rollouts after Prometheus analysis failed. |
-
-The most important proof is the auto-abort result:
-
-```text
-revision 11 = bad canary -> AnalysisRun Failed -> ReplicaSet ScaledDown
-revision 5  = previous stable -> Healthy -> 4 pods Running
+```bash
+kubectl -n argocd get app
 ```
 
-This shows that the system prevented the bad version from becoming the stable release.
+Check Git:
+
+```bash
+git log --oneline --max-count=8
+git status
+```
+
+---
+
+## 17. Result Summary
+
+| Requirement             | Result                                                                 |
+| ----------------------- | ---------------------------------------------------------------------- |
+| All changes through Git | Completed. API and monitoring changes were committed and pushed.       |
+| Argo CD sync            | Completed. Argo CD synced the desired state from Git.                  |
+| SLO and alert           | Completed. `ApiHighErrorRate` fired when API error ratio exceeded 10%. |
+| Email notification      | Completed. Alertmanager sent the alert to personal email.              |
+| Automated canary abort  | Completed. Bad canary revision was aborted automatically.              |
+| Rollback                | Completed. Git revert restored the previous good state.                |
+
+Key result:
+
+```text
+Bad revision 11
+  -> AnalysisRun Failed
+  -> canary ReplicaSet ScaledDown
+
+Previous revision 5
+  -> stable ReplicaSet Healthy
+  -> 4 pods Running
+```
+
+The system successfully prevented the bad version from becoming the stable release.
