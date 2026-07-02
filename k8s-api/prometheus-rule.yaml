@@ -25,4 +25,4 @@ spec:
             slo: availability
           annotations:
             summary: "API error rate is too high"
-            description: "API error rate is above 10% for more than 1 minute. This violates the 99% availability SLO."
+            description: "API error rate is above 10%. This violates the API availability SLO."
