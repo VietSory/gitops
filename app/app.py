@@ -6,7 +6,10 @@ from prometheus_flask_exporter import PrometheusMetrics
 app = Flask(__name__)
 PrometheusMetrics(app)  # auto add /metrics
 
-ERR = float(os.getenv("ERROR_RATE", "0"))
+try:
+    ERR = float(os.getenv("ERROR_RATE", "0"))
+except ValueError:
+    ERR = 0.0
 VER = os.getenv("VERSION", "v1")
 
 
@@ -19,4 +22,4 @@ def index():
 
 @app.get("/healthz")
 def healthz():
-    return "ok", 200
+    return jsonify(status="ok"), 200
