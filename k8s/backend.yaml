@@ -72,6 +72,12 @@ spec:
               port: 8000
             initialDelaySeconds: 3
             periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
           volumeMounts:
             - name: backend-code
               mountPath: /app/app.py
