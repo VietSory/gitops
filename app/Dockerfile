@@ -5,6 +5,9 @@ RUN pip install flask prometheus-flask-exporter
 COPY app.py /app/app.py
 WORKDIR /app
 
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
+
 ENV FLASK_APP=app.py
 EXPOSE 8080
 
