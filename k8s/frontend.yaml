@@ -108,6 +108,18 @@ spec:
           image: nginx:1.27
           ports:
             - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           volumeMounts:
             - name: frontend-html
               mountPath: /usr/share/nginx/html/index.html
