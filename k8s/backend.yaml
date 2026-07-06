@@ -64,6 +64,13 @@ spec:
         - name: backend
           image: python:3.12-alpine
           command: ["python", "/app/app.py"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
           ports:
             - containerPort: 8000
           livenessProbe:
