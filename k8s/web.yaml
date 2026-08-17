@@ -26,6 +26,7 @@ spec:
       labels:
         app: web
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: web
           image: nginx:1.27
