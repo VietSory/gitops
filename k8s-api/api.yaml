@@ -53,10 +53,18 @@ spec:
         - analysis:
             templates:
               - templateName: api-error-rate
+            args:
+              - name: latest-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
         - setWeight: 50
         - analysis:
             templates:
               - templateName: api-error-rate
+            args:
+              - name: latest-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
         - setWeight: 100
 ---
 apiVersion: v1
