@@ -17,3 +17,7 @@ spec:
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s
+      relabelings:
+        - sourceLabels:
+            - __meta_kubernetes_pod_label_rollouts_pod_template_hash
+          targetLabel: rollout_revision

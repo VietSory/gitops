@@ -1,17 +1,23 @@
 FROM python:3.12-slim
 
-RUN pip install flask prometheus-flask-exporter
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-COPY app.py /app/app.py
 WORKDIR /app
 
-RUN useradd -m appuser && chown -R appuser /app
-USER appuser
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
-ENV FLASK_APP=app.py
+COPY app.py ./
+
+RUN groupadd --gid 10001 appuser \
+    && useradd --create-home --uid 10001 --gid 10001 --shell /usr/sbin/nologin appuser \
+    && chown -R 10001:10001 /app
+USER 10001:10001
+
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8080/healthz")' || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8080/healthz", timeout=2)' || exit 1
 
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+CMD ["gunicorn", "--bind=0.0.0.0:8080", "--workers=1", "--threads=4", "--timeout=30", "--graceful-timeout=30", "--access-logfile=-", "--error-logfile=-", "app:app"]

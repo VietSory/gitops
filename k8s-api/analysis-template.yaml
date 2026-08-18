@@ -4,6 +4,8 @@ metadata:
   name: api-error-rate
   namespace: demo
 spec:
+  args:
+    - name: latest-hash
   metrics:
     - name: api-error-rate
       interval: 15s
@@ -16,13 +18,13 @@ spec:
           address: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
           query: |
             (
-              sum(rate(flask_http_request_total{namespace="demo",job="api",status=~"5.."}[1m]))
+              sum(rate(flask_http_request_total{namespace="demo",job="api",rollout_revision="{{args.latest-hash}}",status=~"5.."}[1m]))
               or vector(0)
             )
             /
             clamp_min(
               (
-                sum(rate(flask_http_request_total{namespace="demo",job="api"}[1m]))
+                sum(rate(flask_http_request_total{namespace="demo",job="api",rollout_revision="{{args.latest-hash}}"}[1m]))
                 or vector(0)
               ),
               0.001

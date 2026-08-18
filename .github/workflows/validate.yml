@@ -1,13 +1,82 @@
 name: validate
-on: { pull_request: { paths: ["k8s/**"] } }
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "argocd/**"
+      - "k8s/**"
+      - "k8s-api/**"
+      - "scripts/**"
+      - ".github/workflows/validate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "argocd/**"
+      - "k8s/**"
+      - "k8s-api/**"
+      - "scripts/**"
+      - ".github/workflows/validate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          curl -sSLo kc.tgz https://github.com/yannh/\
-kubeconform/releases/download/v0.6.7/\
-kubeconform-linux-amd64.tar.gz
-          tar -xzf kc.tgz && sudo mv kubeconform /usr/local/bin/
-      - run: kubeconform -strict -summary k8s/
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install validation dependencies
+        run: python -m pip install --disable-pip-version-check -r app/requirements.txt PyYAML==6.0.3
+
+      - name: Run API unit tests
+        run: python -m unittest discover -s app -p "test_*.py" -v
+
+      - name: Build and smoke-test API image
+        run: |
+          set -euo pipefail
+          docker build --pull --tag gitops-api:ci app
+          container_id=$(docker run --detach --publish 127.0.0.1:18080:8080 gitops-api:ci)
+          cleanup() {
+            docker rm --force "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$container_id"
+          exit 1
+
+      - name: Check repository deployment invariants
+        run: python scripts/validate_repo.py
+
+      - name: Validate native Kubernetes manifests
+        run: |
+          docker run --rm -v "$PWD:/work:ro" ghcr.io/yannh/kubeconform:v0.7.0 \
+            -strict -summary /work/k8s
+
+      - name: Validate mixed CRD manifest directories
+        run: |
+          docker run --rm -v "$PWD:/work:ro" ghcr.io/yannh/kubeconform:v0.7.0 \
+            -strict -summary -ignore-missing-schemas /work/k8s-api /work/argocd
